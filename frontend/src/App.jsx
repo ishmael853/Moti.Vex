@@ -1,18 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ShoppingCart, ImageOff, ChevronLeft, ChevronRight, Search, CheckCircle2, Eye, ShieldCheck, EyeOff, Wrench, Circle, BatteryCharging, Disc3, X, Minus, Plus, CircleHelp, ArrowRight } from 'lucide-react'
 import './App.css'
+import Dashboard from './components/Dashboard'
 
 const API_URL = 'http://localhost:8000'
-const LOGO_URL = '/images/moti-vex-logo.png'
 
-const HERO_CARS = [
-  '/images/moti-vex-car-01.png',
-  '/images/moti-vex-car-02.png',
-  '/images/moti-vex-car-03.png',
-  '/images/moti-vex-car-04.png',
-  '/images/moti-vex-car-05.png',
-  '/images/moti-vex-car-06.png',
-  '/images/moti-vex-car-07.png',
+const IMAGE_BASE = `${import.meta.env.BASE_URL}images/`
+
+const LOGO_URL = `${IMAGE_BASE}moti-vex-logo.png`
+
+const HERO_IMAGES = [
+  `${IMAGE_BASE}moti-vex-car-01.png`,
+  `${IMAGE_BASE}moti-vex-car-02.png`,
+  `${IMAGE_BASE}moti-vex-car-03.png`,
+  `${IMAGE_BASE}moti-vex-car-04.png`,
+  `${IMAGE_BASE}moti-vex-car-05.png`,
+  `${IMAGE_BASE}moti-vex-car-06.png`,
+  `${IMAGE_BASE}moti-vex-car-07.png`,
 ]
+
+const HERO_CARS = HERO_IMAGES
 
 const getProductImage = (product) => {
   const image =
@@ -55,6 +62,11 @@ const formatPrice = (price) => {
 
 function App() {
   const [products, setProducts] = useState([])
+  const [productImages, setProductImages] = useState({})
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+  const [productSearch, setProductSearch] = useState('')
+  const [productSort, setProductSort] = useState('featured')
+  const [stockFilter, setStockFilter] = useState('all')
   const [loadingProducts, setLoadingProducts] = useState(true)
   const [productsError, setProductsError] = useState('')
 
@@ -63,6 +75,10 @@ function App() {
 
   const [heroCarIndex, setHeroCarIndex] = useState(0)
   const [heroDirection, setHeroDirection] = useState('next')
+
+  const [cartSummary, setCartSummary] = useState(null)
+  const [cartLoading, setCartLoading] = useState(false)
+  const [cartError, setCartError] = useState('')
 
   const [user, setUser] = useState(() => {
     try {
@@ -77,10 +93,21 @@ function App() {
     () => localStorage.getItem('carPartsToken') || ''
   )
 
+  const [showDashboard, setShowDashboard] = useState(true)
+
   const [authPage, setAuthPage] = useState(null)
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState('')
   const [authSuccess, setAuthSuccess] = useState('')
+
+  const [verificationEmail, setVerificationEmail] = useState('')
+  const [verificationCode, setVerificationCode] = useState('')
+
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetCode, setResetCode] = useState('')
+  const [resetToken, setResetToken] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
 
   const [showLoginPassword, setShowLoginPassword] = useState(false)
   const [showRegisterPassword, setShowRegisterPassword] = useState(false)
@@ -133,6 +160,74 @@ function App() {
               ? data.items
               : []
 
+        const galleryEntries = await Promise.all(
+          productList.map(async (product) => {
+            const fallbackImage = getProductImage(product)
+
+            try {
+              const imageResponse = await fetch(
+                `${API_URL}/api/v1/products/${product.id}/images`
+              )
+
+              if (!imageResponse.ok) {
+                throw new Error(`Image request failed (${imageResponse.status})`)
+              }
+
+              const imageData = await imageResponse.json()
+
+              const images = Array.isArray(imageData)
+                ? imageData
+                : Array.isArray(imageData?.images)
+                  ? imageData.images
+                  : Array.isArray(imageData?.items)
+                    ? imageData.items
+                    : Array.isArray(imageData?.Items)
+                      ? imageData.Items
+                      : []
+
+              const urls = images
+                .slice()
+                .sort((a, b) => {
+                  if (Boolean(a.is_primary) !== Boolean(b.is_primary)) {
+                    return a.is_primary ? -1 : 1
+                  }
+
+                  return Number(a.sort_order || 0) - Number(b.sort_order || 0)
+                })
+                .map((image) =>
+                  getProductImage({
+                    image_url:
+                      image.public_url ||
+                      image.image_url ||
+                      image.url ||
+                      '',
+                  })
+                )
+                .filter(Boolean)
+
+              return [
+                product.id,
+                urls.length > 0
+                  ? [...new Set(urls)]
+                  : fallbackImage
+                    ? [fallbackImage]
+                    : [],
+              ]
+            } catch (imageError) {
+              console.warn(
+                `Unable to load gallery for product ${product.id}:`,
+                imageError
+              )
+
+              return [
+                product.id,
+                fallbackImage ? [fallbackImage] : [],
+              ]
+            }
+          })
+        )
+
+        setProductImages(Object.fromEntries(galleryEntries))
         setProducts(productList)
       } catch (error) {
         console.error('Product loading error:', error)
@@ -147,68 +242,392 @@ function App() {
     loadProducts()
   }, [])
 
+  const filteredProducts = useMemo(() => {
+    const search = productSearch.trim().toLowerCase()
+
+    let result = products.filter((product) => {
+      const searchableText = [
+        product?.name,
+        product?.description,
+        product?.part_number,
+        product?.partNumber,
+        product?.sku,
+        product?.brand,
+        product?.brand_name,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+
+      const stock = Number(
+        product?.stock_quantity ??
+          product?.stock ??
+          0
+      )
+
+      const matchesSearch =
+        !search || searchableText.includes(search)
+
+      const matchesStock =
+        stockFilter === 'all' ||
+        (stockFilter === 'in-stock' && stock > 0) ||
+        (stockFilter === 'out-of-stock' && stock <= 0)
+
+      return matchesSearch && matchesStock
+    })
+
+    if (productSort === 'price-low') {
+      result.sort(
+        (a, b) =>
+          Number(a?.price ?? a?.unit_price ?? 0) -
+          Number(b?.price ?? b?.unit_price ?? 0)
+      )
+    }
+
+    if (productSort === 'price-high') {
+      result.sort(
+        (a, b) =>
+          Number(b?.price ?? b?.unit_price ?? 0) -
+          Number(a?.price ?? a?.unit_price ?? 0)
+      )
+    }
+
+    if (productSort === 'newest') {
+      result.sort(
+        (a, b) =>
+          new Date(b?.created_at ?? 0).getTime() -
+          new Date(a?.created_at ?? 0).getTime()
+      )
+    }
+
+    return result
+  }, [
+    products,
+    productSearch,
+    productSort,
+    stockFilter,
+  ])
+
+
   /*
    * ---------------------------------------------------------
    * CART
    * ---------------------------------------------------------
    */
 
-  useEffect(() => {
-    localStorage.setItem('carPartsCart', JSON.stringify(cart))
-  }, [cart])
+  const saveGuestCart = (items) => {
+    localStorage.setItem('carPartsCart', JSON.stringify(items))
+    setCart(items)
+  }
 
-  const addToCart = (product) => {
+  const normalizeBackendCart = (data) => {
+    const items = Array.isArray(data?.items) ? data.items : []
+
+    return {
+      items: items.map((item) => {
+        const product = products.find(
+          (candidate) =>
+            Number(candidate.id) === Number(item.product_id)
+        )
+
+        return {
+          ...product,
+          id: Number(item.product_id),
+          product_id: Number(item.product_id),
+          cartItemId: Number(item.id),
+          name: item.product_name || product?.name || 'Automotive Part',
+          price: Number(item.unit_price || 0),
+          unit_price: Number(item.unit_price || 0),
+          quantity: Number(item.quantity || 0),
+          line_total: Number(item.line_total || 0),
+          image_url:
+            product?.image_url ||
+            product?.imageUrl ||
+            product?.image ||
+            '',
+        }
+      }),
+      summary: {
+        subtotal: Number(data?.subtotal || 0),
+        delivery_fee: Number(data?.delivery_fee || 0),
+        total: Number(data?.total || 0),
+      },
+    }
+  }
+
+  const cartRequest = async (path, options = {}, accessToken = token) => {
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+    }
+
+    const response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+    })
+
+    const data =
+      response.status === 204
+        ? null
+        : await response.json().catch(() => null)
+
+    if (!response.ok) {
+      throw new Error(
+        data?.detail ||
+          data?.message ||
+          `Cart request failed (${response.status}).`
+      )
+    }
+
+    return data
+  }
+
+  const applyBackendCart = (data) => {
+    const normalized = normalizeBackendCart(data)
+    setCart(normalized.items)
+    setCartSummary(normalized.summary)
+    setCartError('')
+  }
+
+  useEffect(() => {
+    if (!token) {
+      setCartSummary(null)
+      setCartError('')
+      return
+    }
+
+    let cancelled = false
+
+    const loadBackendCart = async () => {
+      try {
+        setCartLoading(true)
+
+        const data = await cartRequest('/api/v1/cart', {}, token)
+
+        if (!cancelled) {
+          applyBackendCart(data)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setCartError(error.message || 'Unable to load your cart.')
+        }
+      } finally {
+        if (!cancelled) {
+          setCartLoading(false)
+        }
+      }
+    }
+
+    loadBackendCart()
+
+    return () => {
+      cancelled = true
+    }
+  }, [token, products])
+
+  useEffect(() => {
+    if (!token) {
+      localStorage.setItem('carPartsCart', JSON.stringify(cart))
+    }
+  }, [cart, token])
+
+  const addToCart = async (product) => {
     if (!product) return
 
-    setCart((currentCart) => {
-      const existingItem = currentCart.find(
-        (item) => item.id === product.id
-      )
+    setCartError('')
 
-      if (existingItem) {
-        return currentCart.map((item) =>
-          item.id === product.id
-            ? {
-                ...item,
-                quantity: item.quantity + 1,
-              }
+    if (token) {
+      try {
+        setCartLoading(true)
+
+        const existingItem = cart.find(
+          (item) => Number(item.id) === Number(product.id)
+        )
+
+        let data
+
+        if (existingItem?.cartItemId) {
+          data = await cartRequest(
+            `/api/v1/cart/items/${existingItem.cartItemId}`,
+            {
+              method: 'PATCH',
+              body: JSON.stringify({
+                quantity: Number(existingItem.quantity) + 1,
+              }),
+            }
+          )
+        } else {
+          data = await cartRequest('/api/v1/cart/items', {
+            method: 'POST',
+            body: JSON.stringify({
+              product_id: Number(product.id),
+              quantity: 1,
+            }),
+          })
+        }
+
+        applyBackendCart(data)
+      } catch (error) {
+        setCartError(error.message || 'Unable to add this item.')
+      } finally {
+        setCartLoading(false)
+      }
+
+      return
+    }
+
+    const existingItem = cart.find(
+      (item) => Number(item.id) === Number(product.id)
+    )
+
+    if (existingItem) {
+      saveGuestCart(
+        cart.map((item) =>
+          Number(item.id) === Number(product.id)
+            ? { ...item, quantity: Number(item.quantity) + 1 }
             : item
+        )
+      )
+    } else {
+      saveGuestCart([...cart, { ...product, quantity: 1 }])
+    }
+  }
+
+  const updateCartQuantity = async (productId, change) => {
+    const item = cart.find(
+      (entry) => Number(entry.id) === Number(productId)
+    )
+
+    if (!item) return
+
+    const nextQuantity = Number(item.quantity) + change
+    setCartError('')
+
+    if (token) {
+      if (!item.cartItemId) {
+        setCartError('Cart item information is missing. Please reload your cart.')
+        return
+      }
+
+      try {
+        setCartLoading(true)
+
+        const data =
+          nextQuantity <= 0
+            ? await cartRequest(
+                `/api/v1/cart/items/${item.cartItemId}`,
+                { method: 'DELETE' }
+              )
+            : await cartRequest(
+                `/api/v1/cart/items/${item.cartItemId}`,
+                {
+                  method: 'PATCH',
+                  body: JSON.stringify({ quantity: nextQuantity }),
+                }
+              )
+
+        applyBackendCart(data)
+      } catch (error) {
+        setCartError(error.message || 'Unable to update the quantity.')
+      } finally {
+        setCartLoading(false)
+      }
+
+      return
+    }
+
+    if (nextQuantity <= 0) {
+      saveGuestCart(
+        cart.filter((entry) => Number(entry.id) !== Number(productId))
+      )
+      return
+    }
+
+    saveGuestCart(
+      cart.map((entry) =>
+        Number(entry.id) === Number(productId)
+          ? { ...entry, quantity: nextQuantity }
+          : entry
+      )
+    )
+  }
+
+  const removeFromCart = async (productId) => {
+    const item = cart.find(
+      (entry) => Number(entry.id) === Number(productId)
+    )
+
+    if (!item) return
+
+    setCartError('')
+
+    if (token) {
+      if (!item.cartItemId) {
+        setCartError('Cart item information is missing. Please reload your cart.')
+        return
+      }
+
+      try {
+        setCartLoading(true)
+
+        const data = await cartRequest(
+          `/api/v1/cart/items/${item.cartItemId}`,
+          { method: 'DELETE' }
+        )
+
+        applyBackendCart(data)
+      } catch (error) {
+        setCartError(error.message || 'Unable to remove this item.')
+      } finally {
+        setCartLoading(false)
+      }
+
+      return
+    }
+
+    saveGuestCart(
+      cart.filter((entry) => Number(entry.id) !== Number(productId))
+    )
+  }
+
+  const clearCart = async () => {
+    setCartError('')
+
+    if (!token) {
+      saveGuestCart([])
+      return
+    }
+
+    try {
+      setCartLoading(true)
+
+      let data = null
+
+      for (const item of cart) {
+        if (!item.cartItemId) continue
+
+        data = await cartRequest(
+          `/api/v1/cart/items/${item.cartItemId}`,
+          { method: 'DELETE' }
         )
       }
 
-      return [
-        ...currentCart,
-        {
-          ...product,
-          quantity: 1,
-        },
-      ]
-    })
-  }
-
-  const updateCartQuantity = (productId, change) => {
-    setCart((currentCart) =>
-      currentCart
-        .map((item) =>
-          item.id === productId
-            ? {
-                ...item,
-                quantity: item.quantity + change,
-              }
-            : item
-        )
-        .filter((item) => item.quantity > 0)
-    )
-  }
-
-  const removeFromCart = (productId) => {
-    setCart((currentCart) =>
-      currentCart.filter((item) => item.id !== productId)
-    )
-  }
-
-  const clearCart = () => {
-    setCart([])
+      if (data) {
+        applyBackendCart(data)
+      } else {
+        setCart([])
+        setCartSummary({
+          subtotal: 0,
+          delivery_fee: 0,
+          total: 0,
+        })
+      }
+    } catch (error) {
+      setCartError(error.message || 'Unable to clear your cart.')
+    } finally {
+      setCartLoading(false)
+    }
   }
 
   const cartItemCount = useMemo(
@@ -225,12 +644,81 @@ function App() {
       cart.reduce(
         (total, item) =>
           total +
-          Number(item.price || item.unit_price || 0) *
+          Number(item.price ?? item.unit_price ?? 0) *
             Number(item.quantity || 0),
         0
       ),
     [cart]
   )
+
+  const displayedSubtotal = token && cartSummary
+    ? cartSummary.subtotal
+    : cartTotal
+
+  const syncGuestCartToBackend = async (accessToken) => {
+  let guestItems = []
+
+  try {
+    const saved = localStorage.getItem('carPartsCart')
+    guestItems = saved ? JSON.parse(saved) : []
+  } catch {
+    guestItems = []
+  }
+
+  if (!Array.isArray(guestItems) || guestItems.length === 0) {
+    const data = await cartRequest(
+      '/api/v1/cart',
+      {},
+      accessToken
+    )
+    applyBackendCart(data)
+    return
+  }
+
+  let remainingItems = [...guestItems]
+
+  for (const item of guestItems) {
+    const productId = Number(item.product_id ?? item.id)
+    const quantity = Math.max(1, Number(item.quantity) || 1)
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      continue
+    }
+
+    await cartRequest(
+      '/api/v1/cart/items',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          product_id: productId,
+          quantity,
+        }),
+      },
+      accessToken
+    )
+
+    remainingItems = remainingItems.filter(
+      (remaining) => remaining !== item
+    )
+
+    localStorage.setItem(
+      'carPartsCart',
+      JSON.stringify(remainingItems)
+    )
+  }
+
+  const data = await cartRequest(
+    '/api/v1/cart',
+    {},
+    accessToken
+  )
+
+  applyBackendCart(data)
+
+  if (remainingItems.length === 0) {
+    localStorage.removeItem('carPartsCart')
+  }
+}
 
   /*
    * ---------------------------------------------------------
@@ -242,7 +730,7 @@ function App() {
     setHeroDirection('next')
 
     setHeroCarIndex((current) =>
-      (current + 1) % HERO_CARS.length
+      (current + 1) % HERO_IMAGES.length
     )
   }
 
@@ -251,7 +739,7 @@ function App() {
 
     setHeroCarIndex(
       (current) =>
-        (current - 1 + HERO_CARS.length) % HERO_CARS.length
+        (current - 1 + HERO_IMAGES.length) % HERO_IMAGES.length
     )
   }
 
@@ -265,7 +753,7 @@ function App() {
       setHeroDirection('next')
 
       setHeroCarIndex((current) =>
-        (current + 1) % HERO_CARS.length
+        (current + 1) % HERO_IMAGES.length
       )
     }, 5500)
 
@@ -369,26 +857,15 @@ function App() {
         )
       }
 
-      if (data?.access_token) {
-        localStorage.setItem(
-          'carPartsToken',
-          data.access_token
-        )
+      const email = registerForm.email.trim().toLowerCase()
 
-        setToken(data.access_token)
-      }
-
-      if (data?.user) {
-        localStorage.setItem(
-          'carPartsUser',
-          JSON.stringify(data.user)
-        )
-
-        setUser(data.user)
-      }
+      setVerificationEmail(email)
+      setVerificationCode('')
+      setAuthPage('verifyEmail')
 
       setAuthSuccess(
-        'Account created successfully. Welcome to Moti.Vex.'
+        data?.message ||
+          'Account created. Please check your email for your verification code and enter it below.'
       )
 
       setRegisterForm({
@@ -397,14 +874,264 @@ function App() {
         password: '',
       })
 
-      setTimeout(() => {
-        setAuthPage(null)
-        setAuthSuccess('')
-      }, 1300)
     } catch (error) {
       setAuthError(
         error.message || 'Unable to create your account.'
       )
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+
+  const handleVerifyEmail = async (event) => {
+    event.preventDefault()
+
+    setAuthError('')
+    setAuthSuccess('')
+    setAuthLoading(true)
+
+    try {
+      if (!verificationEmail || !/^\d{6}$/.test(verificationCode)) {
+        throw new Error('Enter the six-digit verification code.')
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/v1/auth/verify-email`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: verificationEmail,
+            code: verificationCode,
+          }),
+        }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail || data?.message || 'Email verification failed.'
+        )
+      }
+
+      setAuthSuccess(
+        data?.message || 'Email verified successfully. You can now sign in.'
+      )
+      setLoginForm((current) => ({
+        ...current,
+        email: verificationEmail,
+      }))
+      setVerificationCode('')
+      setAuthPage('login')
+    } catch (error) {
+      setAuthError(error.message || 'Unable to verify your email.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+
+  const handleResendVerification = async () => {
+    setAuthError('')
+    setAuthSuccess('')
+    setAuthLoading(true)
+
+    try {
+      if (!verificationEmail) {
+        throw new Error('Enter your email address first.')
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/v1/auth/resend-verification`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: verificationEmail,
+          }),
+        }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail || data?.message || 'Could not resend the code.'
+        )
+      }
+
+      setAuthSuccess(
+        data?.message || 'A new verification code has been requested.'
+      )
+    } catch (error) {
+      setAuthError(error.message || 'Unable to resend the code.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+
+  const handleRequestPasswordReset = async (event) => {
+    event.preventDefault()
+
+    setAuthError('')
+    setAuthSuccess('')
+    setAuthLoading(true)
+
+    try {
+      if (!resetEmail.trim()) {
+        throw new Error('Please enter your email address.')
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/v1/auth/forgot-password`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: resetEmail.trim().toLowerCase(),
+          }),
+        }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail || data?.message || 'Unable to request a reset code.'
+        )
+      }
+
+      setAuthSuccess(
+        data?.message ||
+          'If the account exists, a password-reset code has been sent.'
+      )
+      setAuthPage('resetCode')
+    } catch (error) {
+      setAuthError(
+        error.message || 'Unable to request a password-reset code.'
+      )
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+
+  const handleVerifyResetCode = async (event) => {
+    event.preventDefault()
+
+    setAuthError('')
+    setAuthSuccess('')
+    setAuthLoading(true)
+
+    try {
+      if (!resetEmail.trim() || !/^\d{6}$/.test(resetCode)) {
+        throw new Error('Enter the six-digit password-reset code.')
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/v1/auth/verify-reset-code`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: resetEmail.trim().toLowerCase(),
+            code: resetCode,
+          }),
+        }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail || data?.message || 'Reset-code verification failed.'
+        )
+      }
+
+      if (!data?.reset_token) {
+        throw new Error('The server did not return a reset token. Please try again.')
+      }
+
+      setResetToken(data.reset_token)
+      setResetCode('')
+      setAuthSuccess('Code verified. You can now choose a new password.')
+      setAuthPage('resetPassword')
+    } catch (error) {
+      setAuthError(error.message || 'Unable to verify the reset code.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+
+  const handleResetPassword = async (event) => {
+    event.preventDefault()
+
+    setAuthError('')
+    setAuthSuccess('')
+    setAuthLoading(true)
+
+    try {
+      if (!resetToken) {
+        throw new Error('Your reset session has expired. Request a new code.')
+      }
+
+      if (newPassword.length < 8) {
+        throw new Error('Your new password must contain at least 8 characters.')
+      }
+
+      if (newPassword !== confirmNewPassword) {
+        throw new Error('The passwords do not match.')
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/v1/auth/reset-password`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            reset_token: resetToken,
+            new_password: newPassword,
+          }),
+        }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail || data?.message || 'Password reset failed.'
+        )
+      }
+
+      setResetToken('')
+      setResetCode('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+      setLoginForm((current) => ({
+        ...current,
+        email: resetEmail,
+        password: '',
+      }))
+      setAuthPage('login')
+      setAuthSuccess(
+        data?.message || 'Password updated. Please sign in with your new password.'
+      )
+    } catch (error) {
+      setAuthError(error.message || 'Unable to reset your password.')
     } finally {
       setAuthLoading(false)
     }
@@ -488,18 +1215,37 @@ function App() {
   }
 
   const logout = () => {
-    localStorage.removeItem('carPartsToken')
-    localStorage.removeItem('carPartsUser')
+  let guestItems = []
 
-    setToken('')
-    setUser(null)
-    setAuthPage(null)
+  try {
+    const saved = localStorage.getItem('carPartsCart')
+    guestItems = saved ? JSON.parse(saved) : []
+  } catch {
+    guestItems = []
   }
 
-  const handleForgotPassword = () => {
-    setAuthError(
-      'Password reset will be connected when the backend reset-password endpoint is added.'
-    )
+  localStorage.removeItem('carPartsToken')
+  localStorage.removeItem('carPartsUser')
+
+  setToken('')
+  setUser(null)
+  setCart(Array.isArray(guestItems) ? guestItems : [])
+  setCartSummary(null)
+  setCartError('')
+  setAuthPage(null)
+}
+
+
+  const handleForgotPassword = async () => {
+    setAuthError('')
+    setAuthSuccess('')
+    setAuthLoading(false)
+    setResetEmail(loginForm.email.trim().toLowerCase())
+    setResetCode('')
+    setResetToken('')
+    setNewPassword('')
+    setConfirmNewPassword('')
+    setAuthPage('forgotPassword')
   }
 
   /*
@@ -559,7 +1305,7 @@ function App() {
           onClick={backToStore}
         >
           <span>←</span>
-          Back to store
+
         </button>
 
         <div className="auth-layout">
@@ -572,7 +1318,7 @@ function App() {
               />
 
               <span className="auth-eyebrow">
-                PERFORMANCE • PRECISION • TRUST
+                PERFORMANCE  |  PRECISION  |  TRUST
               </span>
 
               <h1>
@@ -590,7 +1336,7 @@ function App() {
               <div className="auth-car-art">
                 <span className="auth-car-glow"></span>
                 <img
-                  src="/images/moti-vex-car-03.png"
+                  src={HERO_IMAGES[2]}
                   alt="Moti.Vex automotive"
                 />
               </div>
@@ -675,7 +1421,7 @@ function App() {
 
               {authSuccess && (
                 <div className="auth-message auth-success">
-                  <span>✓</span>
+                  <CheckCircle2 size={18} strokeWidth={2} aria-hidden="true" />
                   {authSuccess}
                 </div>
               )}
@@ -709,7 +1455,7 @@ function App() {
 
                     <div className="input-shell">
                       <span className="input-icon">
-                        ●
+                        Â
                       </span>
 
                       <input
@@ -739,7 +1485,7 @@ function App() {
                             : 'Show password'
                         }
                       >
-                        {showLoginPassword ? '◉' : '◌'}
+                        {showLoginPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                       </button>
                     </div>
                   </label>
@@ -755,7 +1501,7 @@ function App() {
                       className="auth-forgot"
                       onClick={handleForgotPassword}
                     >
-                      <span>?</span>
+                      <span aria-hidden="true"><CircleHelp size={15} strokeWidth={2} /></span>
                       Forgot password?
                     </button>
                   </div>
@@ -783,17 +1529,97 @@ function App() {
                     </button>
                   </p>
                 </form>
-              ) : (
+              ) : authPage === 'verifyEmail' ? (
+                <form
+                  className="auth-form"
+                  onSubmit={handleVerifyEmail}
+                >
+                  <label className="form-field">
+                    <span>Email Address</span>
+                    <div className="input-shell">
+                      <span className="input-icon">@</span>
+                      <input type="email"
+                      value={verificationEmail}
+                      readOnly
+                      autoComplete="email"
+                      />
+                    </div>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Six-digit verification code</span>
+                    <div className="input-shell">
+                      <span className="input-icon">#</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]{6}"
+                        maxLength={6}
+                        placeholder="Enter your code"
+                        value={verificationCode}
+                        onChange={(event) =>
+                          setVerificationCode(
+                            event.target.value.replace(/\D/g, '')
+                          )
+                        }
+                        autoComplete="one-time-code"
+                        required
+                      />
+                    </div>
+                  </label>
+
+                  <button
+                    type="submit"
+                    className="auth-submit"
+                    disabled={authLoading}
+                  >
+                    {authLoading
+                      ? 'Verifying...'
+                      : 'Verify email'}
+                    <span>→</span>
+                  </button>
+
+                  <p className="auth-switch-text">
+                    Didn't receive a code?{' '}
+                    <button
+                      type="button"
+                      onClick={handleResendVerification}
+                      disabled={authLoading}
+                    >
+                      Resend code
+                    </button>
+                  </p>
+
+                  <p className="auth-switch-text">
+                    Already verified?{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthError('')
+                        setAuthSuccess('')
+                        setLoginForm((current) => ({
+                          ...current,
+                          email: verificationEmail,
+                        }))
+                        setAuthPage('login')
+                      }}
+                      >
+                        sign in
+                        </button>
+                        </p>
+                </form>
+              ) : authPage === 'register' ? (
                 <form
                   className="auth-form"
                   onSubmit={handleRegister}
                 >
+
                   <label className="form-field">
                     <span>Full name</span>
 
                     <div className="input-shell">
                       <span className="input-icon">
-                        ◉
+                        â€°
                       </span>
 
                       <input
@@ -831,7 +1657,7 @@ function App() {
 
                     <div className="input-shell">
                       <span className="input-icon">
-                        ●
+                        Â
                       </span>
 
                       <input
@@ -861,15 +1687,13 @@ function App() {
                             : 'Show password'
                         }
                       >
-                        {showRegisterPassword
-                          ? '◉'
-                          : '◌'}
+                        {showRegisterPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                       </button>
                     </div>
                   </label>
 
                   <div className="password-hint">
-                    <span>✓</span>
+                    <CheckCircle2 size={18} strokeWidth={2} aria-hidden="true" />
                     Use a strong password with letters,
                     numbers and symbols.
                   </div>
@@ -897,10 +1721,149 @@ function App() {
                     </button>
                   </p>
                 </form>
-              )}
+            ) : authPage === 'forgotPassword' ? (
+              <form
+                className="auth-form"
+                onSubmit={handleRequestPasswordReset}
+                >
+                  <p>
+                    Enter your email address to request a password-reset code.
+                  </p>
+
+                  <label className="form-field">
+                    <span>Email address</span>
+                    <div className="input-shell">
+                      <span className="input-icon">@</span>
+                      <input
+                        type="email"
+                        value={resetEmail}
+                        onChange={(event) => setResetEmail(event.target.value)}
+                        placeholder="you@example.com"
+                        autoComplete="email"
+                        required
+                        />
+                    </div>
+                  </label>
+
+                  <button
+                    type="submit"
+                    className="auth-submit"
+                    disabled={authLoading}
+                  >
+                    {authLoading ? 'Requesting code...' : 'Send reset code'}
+                  </button>
+
+                  <p className="auth-switch-text">
+                    Remember your password?{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthError('')
+                        setAuthSuccess('')
+                        setAuthPage('login')
+                      }}
+                    >
+                      Back to login
+                    </button>
+                  </p>
+                </form>
+              ) : authPage === 'resetCode' ? (
+                <form
+                   className="auth-form"
+                  onSubmit={handleVerifyResetCode}
+                >
+                  <p>Enter the six-digit code sent to {resetEmail}.</p>
+
+                  <label className="form-field">
+                    <span>Reset code</span>
+                    <div className="input-shell">
+                      <span className="input-icon">#</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]{6}"
+                        maxLength={6}
+                        value={resetCode}
+                        onChange={(event) =>
+                          setResetCode(event.target.value.replace(/\D/g, ''))
+                        }
+                        placeholder="Enter your code"
+                        autoComplete="one-time-code"
+                        required
+                      />
+                    </div>
+                  </label>
+
+                  <button
+                    type="submit"
+                    className="auth-submit"
+                    disabled={authLoading}
+                  >
+                    {authLoading ? 'Verifying...' : 'Verify code'}
+                  </button>
+
+                  <p className="auth-switch-text">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthError('')
+                        setAuthSuccess('')
+                        setAuthPage('forgotPassword')
+                      }}
+                    >
+                      Request another code
+                    </button>
+                  </p>
+                </form>
+              ) : authPage === 'resetPassword' ? (
+                <form
+                  className="auth-form"
+                  onSubmit={handleResetPassword}
+                >
+                   <label className="form-field">
+                    <span>New password</span>
+                    <div className="input-shell">
+                      <input
+                        type="password"
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                        placeholder="at least 8 characters"
+                        autoComplete="new-password"
+                        minLength={8}
+                        required
+                      />
+                    </div>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Confirm new password</span>
+                    <div className="input-shell">
+                      <input
+                        type="password"
+                        value={confirmNewPassword}
+                        onChange={(event) =>
+                          setConfirmNewPassword(event.target.value)
+                        }
+                        placeholder="Enter the password again"
+                        autoComplete="new-password"
+                        minLength={8}
+                        required
+                      />
+                    </div>
+                  </label>
+
+                  <button
+                    type="submit"
+                    className="auth-submit"
+                    disabled={authLoading}
+                  >
+                    {authLoading ? 'Updating password...' : 'Update password'}
+                  </button>
+                </form>
+              ) : null}
 
               <div className="auth-security">
-                <span>◆</span>
+                <span aria-hidden="true"><ShieldCheck size={18} /></span>
                 Your account information is securely
                 transmitted.
               </div>
@@ -908,6 +1871,18 @@ function App() {
           </div>
         </div>
       </div>
+    )
+  }
+
+  const dashboardRoles = ['OWNER', 'ADMIN', 'STAFF']
+  if (user && showDashboard && dashboardRoles.includes(String(user.role || '').toUpperCase())) {
+    return (
+      <Dashboard
+        user={user}
+        token={token}
+        onReturnToStore={() => setShowDashboard(false)}
+        onLogout={logout}
+      />
     )
   }
 
@@ -976,7 +1951,7 @@ function App() {
               className="cart-button"
               onClick={() => setShowCart(true)}
             >
-              <span className="cart-icon">🛒</span>
+              <span className="cart-icon" aria-hidden="true"><ShoppingCart size={20} strokeWidth={1.8} /></span>
               <span>Cart</span>
 
               {cartItemCount > 0 && (
@@ -991,6 +1966,16 @@ function App() {
                 <span className="user-greeting">
                   Hi, {user.name}
                 </span>
+
+                {['OWNER', 'ADMIN', 'STAFF'].includes(String(user.role || '').toUpperCase()) && (
+                  <button
+                    type="button"
+                    className="navbar-auth-button"
+                    onClick={() => setShowDashboard(true)}
+                  >
+                    {String(user.role).toUpperCase() === 'OWNER' ? 'Owner Dashboard' : String(user.role).toUpperCase() === 'ADMIN' ? 'Admin Dashboard' : 'Staff Dashboard'}
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1131,7 +2116,7 @@ function App() {
                     onClick={previousHeroCar}
                     aria-label="Previous car"
                   >
-                    ‹
+                    <ChevronLeft size={22} aria-hidden="true" />
                   </button>
 
                   <div className="hero-dots">
@@ -1160,7 +2145,7 @@ function App() {
                     onClick={nextHeroCar}
                     aria-label="Next car"
                   >
-                    ›
+                    <ChevronRight size={22} aria-hidden="true" />
                   </button>
                 </div>
 
@@ -1216,7 +2201,7 @@ function App() {
               </span>
 
               <span className="category-icon">
-                ⚙️
+                <Wrench size={28} strokeWidth={1.6} aria-hidden="true" />
               </span>
 
               <span className="category-name">
@@ -1245,7 +2230,7 @@ function App() {
               </span>
 
               <span className="category-icon">
-                🛞
+                <Circle size={28} strokeWidth={1.6} aria-hidden="true" />
               </span>
 
               <span className="category-name">
@@ -1274,7 +2259,7 @@ function App() {
               </span>
 
               <span className="category-icon">
-                🔋
+                <BatteryCharging size={28} strokeWidth={1.6} aria-hidden="true" />
               </span>
 
               <span className="category-name">
@@ -1303,7 +2288,7 @@ function App() {
               </span>
 
               <span className="category-icon">
-                🛑
+                <Disc3 size={28} strokeWidth={1.6} aria-hidden="true" />
               </span>
 
               <span className="category-name">
@@ -1346,9 +2331,66 @@ function App() {
               </p>
 
               <span className="product-count">
-                {products.length} PARTS AVAILABLE
+                {filteredProducts.length} OF {products.length} PARTS AVAILABLE
               </span>
             </div>
+          </div>
+
+          <div className="product-discovery">
+            <div className="product-search">
+              <Search size={20} strokeWidth={1.8} aria-hidden="true" />
+
+              <input
+                type="search"
+                value={productSearch}
+                onChange={(event) =>
+                  setProductSearch(event.target.value)
+                }
+                placeholder="Search parts, SKU or part number..."
+                aria-label="Search automotive parts"
+              />
+            </div>
+
+            <select
+              value={productSort}
+              onChange={(event) =>
+                setProductSort(event.target.value)
+              }
+              aria-label="Sort products"
+            >
+              <option value="featured">Featured</option>
+              <option value="newest">Newest first</option>
+              <option value="price-low">Price: Low to high</option>
+              <option value="price-high">Price: High to low</option>
+            </select>
+
+            <select
+              value={stockFilter}
+              onChange={(event) =>
+                setStockFilter(event.target.value)
+              }
+              aria-label="Filter products by stock"
+            >
+              <option value="all">All stock</option>
+              <option value="in-stock">In stock</option>
+              <option value="out-of-stock">Out of stock</option>
+            </select>
+
+            {(productSearch ||
+              productSort !== 'featured' ||
+              stockFilter !== 'all') && (
+              <button
+                type="button"
+                className="product-filter-reset"
+                onClick={() => {
+                  setProductSearch('')
+                  setProductSort('featured')
+                  setStockFilter('all')
+                }}
+              >
+                Reset
+              </button>
+            )}
           </div>
 
           {loadingProducts && (
@@ -1377,9 +2419,7 @@ function App() {
             !productsError &&
             products.length === 0 && (
               <div className="products-state">
-                <span className="empty-icon">
-                  ◇
-                </span>
+                <ImageOff size={30} strokeWidth={1.6} aria-hidden="true" />
                 <p>
                   No products are currently available.
                 </p>
@@ -1388,9 +2428,34 @@ function App() {
 
           {!loadingProducts &&
             !productsError &&
-            products.length > 0 && (
+            products.length > 0 &&
+            filteredProducts.length === 0 && (
+              <div className="products-state">
+                <Search size={30} strokeWidth={1.6} aria-hidden="true" />
+                <h3>No parts found.</h3>
+                <p>
+                  No products match your current search
+                  or filter settings.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductSearch('')
+                    setProductSort('featured')
+                    setStockFilter('all')
+                  }}
+                >
+                  Reset filters
+                </button>
+              </div>
+            )}
+
+          {!loadingProducts &&
+            !productsError &&
+            filteredProducts.length > 0 && (
               <div className="product-grid">
-                {products.map((product) => {
+                {filteredProducts.map((product) => {
                   const image = getProductImage(product)
 
                   const price =
@@ -1455,7 +2520,7 @@ function App() {
                                 : 'flex',
                             }}
                           >
-                            <span>🔧</span>
+                            <span className="image-fallback-icon" aria-label="Image unavailable"><ImageOff size={42} strokeWidth={1.5} /></span>
                           </div>
 
                           <div className="product-image-overlay">
@@ -1662,7 +2727,7 @@ function App() {
 
         <div className="footer-bottom">
           <span>
-            © {new Date().getFullYear()} Moti.Vex. All
+            Â© {new Date().getFullYear()} Moti.Vex. All
             rights reserved.
           </span>
 
@@ -1692,45 +2757,97 @@ function App() {
               }
               aria-label="Close product details"
             >
-              ×
+              Close
             </button>
 
             <div className="modal-product-image">
-              {getProductImage(selectedProduct) ? (
-                <img
-                  src={getProductImage(selectedProduct)}
-                  alt={
-                    selectedProduct.name ||
-                    'Automotive part'
-                  }
-                  onError={(event) => {
-                    event.currentTarget.style.display =
-                      'none'
+              {(() => {
+                const images =
+                  productImages[selectedProduct.id]?.length
+                    ? productImages[selectedProduct.id]
+                    : [getProductImage(selectedProduct)].filter(Boolean)
 
-                    const fallback =
-                      event.currentTarget.parentElement?.querySelector(
-                        '.modal-image-fallback'
-                      )
+                const activeIndex =
+                  images.length > 0
+                    ? selectedImageIndex % images.length
+                    : 0
 
-                    if (fallback) {
-                      fallback.style.display = 'flex'
-                    }
-                  }}
-                />
-              ) : null}
+                const activeImage = images[activeIndex] || ''
 
-              <div
-                className="modal-image-fallback"
-                style={{
-                  display: getProductImage(
-                    selectedProduct
-                  )
-                    ? 'none'
-                    : 'flex',
-                }}
-              >
-                <span>🔧</span>
-              </div>
+                return (
+                  <>
+                    {activeImage ? (
+                      <img
+                        key={activeImage}
+                        src={activeImage}
+                        alt={`${selectedProduct.name || 'Automotive part'} â€” photo ${activeIndex + 1}`}
+                        onError={(event) => {
+                          event.currentTarget.style.display = 'none'
+                        }}
+                      />
+                    ) : (
+                      <div className="modal-image-fallback">
+                        <span className="image-fallback-icon" aria-label="Image unavailable"><ImageOff size={42} strokeWidth={1.5} /></span>
+                      </div>
+                    )}
+
+                    {images.length > 1 && (
+                      <>
+                        <span className="gallery-photo-count">
+                          {activeIndex + 1} / {images.length}
+                        </span>
+
+                        <button
+                          type="button"
+                          className="gallery-arrow gallery-arrow-prev"
+                          aria-label="Previous product photo"
+                          onClick={() =>
+                            setSelectedImageIndex(
+                              (activeIndex - 1 + images.length) % images.length
+                            )
+                          }
+                        >
+                          <ChevronLeft size={24} aria-hidden="true" />
+                        </button>
+
+                        <button
+                          type="button"
+                          className="gallery-arrow gallery-arrow-next"
+                          aria-label="Next product photo"
+                          onClick={() =>
+                            setSelectedImageIndex(
+                              (activeIndex + 1) % images.length
+                            )
+                          }
+                        >
+                          <ChevronRight size={24} aria-hidden="true" />
+                        </button>
+
+                        <div className="gallery-thumbnails">
+                          {images.map((image, index) => (
+                            <button
+                              type="button"
+                              key={image}
+                              className={`gallery-thumbnail${index === activeIndex ? ' active' : ''}`}
+                              aria-label={`View product photo ${index + 1}`}
+                              aria-pressed={index === activeIndex}
+                              onClick={() => setSelectedImageIndex(index)}
+                            >
+                              <img
+                                src={image}
+                                alt=""
+                                onError={(event) => {
+                                  event.currentTarget.style.visibility = 'hidden'
+                                }}
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )
+              })()}
             </div>
 
             <div className="modal-product-content">
@@ -1831,14 +2948,14 @@ function App() {
                 onClick={() => setShowCart(false)}
                 aria-label="Close cart"
               >
-                ×
+                <X size={22} aria-hidden="true" />
               </button>
             </div>
 
             {cart.length === 0 ? (
               <div className="cart-empty">
                 <div className="cart-empty-icon">
-                  🛒
+                  <ShoppingCart size={42} strokeWidth={1.5} aria-hidden="true" />
                 </div>
 
                 <h3>Your cart is empty.</h3>
@@ -1882,7 +2999,7 @@ function App() {
                               }}
                             />
                           ) : (
-                            <span>🔧</span>
+                            <span className="image-fallback-icon" aria-label="Image unavailable"><ImageOff size={42} strokeWidth={1.5} /></span>
                           )}
                         </div>
 
@@ -1911,7 +3028,7 @@ function App() {
                                 )
                               }
                             >
-                              −
+                              <Minus size={16} aria-hidden="true" />
                             </button>
 
                             <strong>
@@ -1927,7 +3044,7 @@ function App() {
                                 )
                               }
                             >
-                              +
+                              <Plus size={16} aria-hidden="true" />
                             </button>
                           </div>
                         </div>
@@ -1960,36 +3077,71 @@ function App() {
                   })}
                 </div>
 
-                <div className="cart-footer">
-                  <div className="cart-summary">
-                    <span>Subtotal</span>
-                    <strong>
-                      {formatPrice(cartTotal)}
-                    </strong>
-                  </div>
+                 <div className="cart-footer">
+                    {cartError && (
+                      <div className="cart-error" role="alert">
+                        {cartError}
+                        </div>
+                    )}
 
-                  <p className="cart-note">
-                    Delivery fees and final checkout
-                    details will be calculated at checkout.
-                  </p>
+                    {cartLoading && (
+                      <p className="cart-note" role="status">
+                        syncing your cart...
+                      </p>
+                    )}
 
-                  <button
-                    type="button"
-                    className="checkout-button"
-                    onClick={handleCheckout}
-                  >
-                    Proceed to checkout
-                    <span>→</span>
-                  </button>
+                    <div className="cart-summary">
+                      <span>subtotal</span>
+                      <strong>
+                        {formatPrice(displayedSubtotal)}
+                      </strong>
+                    </div>
 
-                  <button
-                    type="button"
-                    className="clear-cart-button"
-                    onClick={clearCart}
-                  >
-                    Clear cart
-                  </button>
-                </div>
+                    {token && cartSummary ? (
+                      <>
+                        <div className="cart-summary">
+                          <span>
+                            Delivery fee
+                          </span>
+                          <strong>
+                            {formatPrice(cartSummary.delivery_fee)}
+                          </strong>
+                        </div>
+
+                        <div className="cart-summary cart-grand-total">
+                          <span>
+                            Total
+                          </span>
+                          <strong>
+                            {formatPrice(cartSummary.total)}
+                          </strong>
+                        </div>
+                      </>
+
+                    ) : (
+                      <p className="cart-note">
+                        sign in to sync your cart and view backend-calculated delivery fees.
+                      </p>
+                    )}
+
+                    <button
+                      type="button"
+                      className="checkout-button"
+                      onClick={handleCheckout}
+                      disabled={cartLoading || cart.length === 0}
+                    >
+                      proceed to checkout
+                      <span>→</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="cart-clear-button"
+                      onClick={clearCart}
+                    >
+
+                    </button>
+                   </div>
               </>
             )}
           </aside>
