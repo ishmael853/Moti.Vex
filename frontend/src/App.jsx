@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ShoppingCart, ImageOff, ChevronLeft, ChevronRight, Search, CheckCircle2, Eye, ShieldCheck, EyeOff, Wrench, Circle, BatteryCharging, Disc3, X, Minus, Plus, CircleHelp, ArrowRight } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ShoppingCart, ImageOff, ChevronLeft, ChevronRight, Search, CheckCircle2, Eye, ShieldCheck, EyeOff, Wrench, Circle, BatteryCharging, Disc3, X, Minus, Plus, CircleHelp } from 'lucide-react'
 import './App.css'
 import Dashboard from './components/Dashboard'
 
-const API_URL = 'http://localhost:8000'
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
 const IMAGE_BASE = `${import.meta.env.BASE_URL}images/`
 
@@ -320,7 +320,7 @@ function App() {
     setCart(items)
   }
 
-  const normalizeBackendCart = (data) => {
+  const normalizeBackendCart = useCallback((data) => {
     const items = Array.isArray(data?.items) ? data.items : []
 
     return {
@@ -353,9 +353,9 @@ function App() {
         total: Number(data?.total || 0),
       },
     }
-  }
+  }, [products])
 
-  const cartRequest = async (path, options = {}, accessToken = token) => {
+  const cartRequest = useCallback(async (path, options = {}, accessToken = token) => {
     const headers = {
       Authorization: `Bearer ${accessToken}`,
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
@@ -381,19 +381,17 @@ function App() {
     }
 
     return data
-  }
+  }, [token])
 
-  const applyBackendCart = (data) => {
+  const applyBackendCart = useCallback((data) => {
     const normalized = normalizeBackendCart(data)
     setCart(normalized.items)
     setCartSummary(normalized.summary)
     setCartError('')
-  }
+  }, [normalizeBackendCart])
 
   useEffect(() => {
     if (!token) {
-      setCartSummary(null)
-      setCartError('')
       return
     }
 
@@ -424,7 +422,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [token, products])
+  }, [token, products, cartRequest, applyBackendCart])
 
   useEffect(() => {
     if (!token) {
@@ -656,7 +654,7 @@ function App() {
     : cartTotal
 
   const syncGuestCartToBackend = async (accessToken) => {
-  let guestItems = []
+  let guestItems
 
   try {
     const saved = localStorage.getItem('carPartsCart')
@@ -758,7 +756,7 @@ function App() {
     }, 5500)
 
     return () => clearInterval(heroInterval)
-  }, [])
+  }, [normalizeBackendCart])
 
   useEffect(() => {
     HERO_CARS.forEach((image) => {
@@ -1194,6 +1192,14 @@ function App() {
         setUser(data.user)
       }
 
+      if (data?.access_token) {
+        try {
+          await syncGuestCartToBackend(data.access_token)
+        } catch (error) {
+          setCartError(error.message || 'Unable to sync your saved cart.')
+        }
+      }
+
       setAuthSuccess('Login successful. Welcome back.')
 
       setLoginForm({
@@ -1215,7 +1221,7 @@ function App() {
   }
 
   const logout = () => {
-  let guestItems = []
+  let guestItems
 
   try {
     const saved = localStorage.getItem('carPartsCart')
@@ -1304,7 +1310,7 @@ function App() {
           className="auth-back-button"
           onClick={backToStore}
         >
-          <span>←</span>
+          <span>â†</span>
 
         </button>
 
@@ -1455,7 +1461,7 @@ function App() {
 
                     <div className="input-shell">
                       <span className="input-icon">
-                        Â
+                        Ã‚Â
                       </span>
 
                       <input
@@ -1514,7 +1520,7 @@ function App() {
                     {authLoading
                       ? 'Signing in...'
                       : 'Sign in'}
-                    <span>→</span>
+                    <span>â†’</span>
                   </button>
 
                   <p className="auth-switch-text">
@@ -1576,7 +1582,7 @@ function App() {
                     {authLoading
                       ? 'Verifying...'
                       : 'Verify email'}
-                    <span>→</span>
+                    <span>â†’</span>
                   </button>
 
                   <p className="auth-switch-text">
@@ -1619,7 +1625,7 @@ function App() {
 
                     <div className="input-shell">
                       <span className="input-icon">
-                        â€°
+                        Ã¢â‚¬Â°
                       </span>
 
                       <input
@@ -1657,7 +1663,7 @@ function App() {
 
                     <div className="input-shell">
                       <span className="input-icon">
-                        Â
+                        Ã‚Â
                       </span>
 
                       <input
@@ -1706,7 +1712,7 @@ function App() {
                     {authLoading
                       ? 'Creating account...'
                       : 'Create account'}
-                    <span>→</span>
+                    <span>â†’</span>
                   </button>
 
                   <p className="auth-switch-text">
@@ -2050,7 +2056,7 @@ function App() {
                   onClick={handleShopNow}
                 >
                   Shop now
-                  <span>→</span>
+                  <span>â†’</span>
                 </button>
 
                 <button
@@ -2201,7 +2207,7 @@ function App() {
               </span>
 
               <span className="category-icon">
-                <Wrench size={28} strokeWidth={1.6} aria-hidden="true" />
+                <Wrench size={28} strokeWidth={1.6} aria-hidden="true" />Â
               </span>
 
               <span className="category-name">
@@ -2214,7 +2220,7 @@ function App() {
               </span>
 
               <span className="category-arrow">
-                →
+                â†’
               </span>
             </button>
 
@@ -2243,7 +2249,7 @@ function App() {
               </span>
 
               <span className="category-arrow">
-                →
+                â†’
               </span>
             </button>
 
@@ -2272,7 +2278,7 @@ function App() {
               </span>
 
               <span className="category-arrow">
-                →
+                â†’
               </span>
             </button>
 
@@ -2300,7 +2306,7 @@ function App() {
               </span>
 
               <span className="category-arrow">
-                →
+                â†’
               </span>
             </button>
           </div>
@@ -2617,7 +2623,7 @@ function App() {
                 onClick={handleShopNow}
               >
                 Explore parts
-                <span>→</span>
+                <span>â†’</span>
               </button>
             </div>
 
@@ -2727,7 +2733,7 @@ function App() {
 
         <div className="footer-bottom">
           <span>
-            Â© {new Date().getFullYear()} Moti.Vex. All
+            Ã‚Â© {new Date().getFullYear()} Moti.Vex. All
             rights reserved.
           </span>
 
@@ -2780,7 +2786,7 @@ function App() {
                       <img
                         key={activeImage}
                         src={activeImage}
-                        alt={`${selectedProduct.name || 'Automotive part'} â€” photo ${activeIndex + 1}`}
+                        alt={`${selectedProduct.name || 'Automotive part'} Ã¢â‚¬â€ photo ${activeIndex + 1}`}
                         onError={(event) => {
                           event.currentTarget.style.display = 'none'
                         }}
@@ -2916,7 +2922,7 @@ function App() {
                   }}
                 >
                   Add to cart
-                  <span>→</span>
+                  <span>â†’</span>
                 </button>
               </div>
             </div>
@@ -2974,7 +2980,7 @@ function App() {
                   }}
                 >
                   Browse products
-                  <span>→</span>
+                  <span>â†’</span>
                 </button>
               </div>
             ) : (
@@ -3131,7 +3137,7 @@ function App() {
                       disabled={cartLoading || cart.length === 0}
                     >
                       proceed to checkout
-                      <span>→</span>
+                      <span>â†’</span>
                     </button>
 
                     <button

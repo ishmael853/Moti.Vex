@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './Dashboard.css'
+
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '')
 import { LayoutDashboard, Users, Package, ShieldCheck, ChartNoAxesCombined, ClipboardList, Settings, Boxes, ShoppingBag, CreditCard, Truck, Star, RotateCcw, Store, LogOut, Menu, X, ArrowRight } from 'lucide-react'
 
 
@@ -44,7 +46,7 @@ const DESCRIPTIONS = {
 const resolveImageUrl = (url) => {
   if (!url) return ''
   if (/^https?:\/\//i.test(url)) return url
-  return "http://localhost:8000" + (url.startsWith('/') ? url : '/' + url)
+  return API_URL + (url.startsWith('/') ? url : '/' + url)
 }
 
 function Dashboard({ user, token, onReturnToStore, onLogout }) {
@@ -55,6 +57,11 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
   const [notice, setNotice] = useState('')
   const [permissionRoles, setPermissionRoles] = useState([])
   const [selectedPermissionRole, setSelectedPermissionRole] = useState('ADMIN')
+  const selectedPermissionRoleRef = useRef(selectedPermissionRole)
+
+  useEffect(() => {
+    selectedPermissionRoleRef.current = selectedPermissionRole
+  }, [selectedPermissionRole])
   const [draftPermissions, setDraftPermissions] = useState([])
   const [permissionsLoading, setPermissionsLoading] = useState(false)
   const [permissionsSaving, setPermissionsSaving] = useState(false)
@@ -117,7 +124,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
       setPermissionsLoading(true)
       setPermissionsError('')
       try {
-        const response = await fetch('http://localhost:8000/api/v1/users/roles/permissions', {
+        const response = await fetch(`${API_URL}/api/v1/users/roles/permissions`, {
           headers: { Authorization: `Bearer ${token}` },
         })
         const data = await response.json().catch(() => ({}))
@@ -125,7 +132,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
         if (!Array.isArray(data)) throw new Error('The server returned an unexpected permissions response.')
         if (!cancelled) {
           setPermissionRoles(data)
-          const current = data.find(item => item.role === selectedPermissionRole) || data.find(item => item.role === 'ADMIN') || data[0]
+          const current = data.find(item => item.role === selectedPermissionRoleRef.current) || data.find(item => item.role === 'ADMIN') || data[0]
           if (current) {
             setSelectedPermissionRole(current.role)
             setDraftPermissions(current.permissions || [])
@@ -172,8 +179,8 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
 
       try {
         const endpoint = isAccounts
-          ? 'http://localhost:8000/api/v1/users'
-          : 'http://localhost:8000/api/v1/users/audit?limit=100'
+          ? `${API_URL}/api/v1/users`
+          : `${API_URL}/api/v1/users/audit?limit=100`
         const response = await fetch(endpoint, {
           headers: { Authorization: `Bearer ${token}` },
         })
@@ -208,9 +215,9 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
       setProductsError('')
       try {
         const endpoints = [
-          'http://localhost:8000/api/v1/products',
-          'http://localhost:8000/api/v1/categories',
-          'http://localhost:8000/api/v1/brands',
+          `${API_URL}/api/v1/products`,
+          `${API_URL}/api/v1/categories`,
+          `${API_URL}/api/v1/brands`,
         ]
         const results = await Promise.all(endpoints.map(async endpoint => {
           const response = await fetch(endpoint)
@@ -260,7 +267,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
     setPermissionsError('')
     setNotice('')
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/users/roles/${selectedPermissionRole}/permissions`, {
+      const response = await fetch(`${API_URL}/api/v1/users/roles/${selectedPermissionRole}/permissions`, {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -288,7 +295,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
     setNotice('')
     try {
       const endpoint = accountCreateForm.role === 'ADMIN' ? 'admin' : 'staff'
-      const response = await fetch(`http://localhost:8000/api/v1/users/${endpoint}`, {
+      const response = await fetch(`${API_URL}/api/v1/users/${endpoint}`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -326,7 +333,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
     setCategoryCreateError('')
     setNotice('')
     try {
-      const response = await fetch('http://localhost:8000/api/v1/categories', {
+      const response = await fetch(`${API_URL}/api/v1/categories`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -359,7 +366,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
     setBrandCreateError('')
     setNotice('')
     try {
-      const response = await fetch('http://localhost:8000/api/v1/brands', {
+      const response = await fetch(`${API_URL}/api/v1/brands`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -385,7 +392,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
     setImageGalleryLoading(previous => ({ ...previous, [productId]: true }))
     setImageGalleryError(previous => ({ ...previous, [productId]: '' }))
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/products/${productId}/images`)
+      const response = await fetch(`${API_URL}/api/v1/products/${productId}/images`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
         const detail = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join(', ') : data.detail
@@ -412,7 +419,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
     setImageDeleteLoading(previous => ({ ...previous, [image.id]: true }))
     setImageDeleteStatus(previous => ({ ...previous, [image.id]: null }))
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/products/${productId}/images/${image.id}`, {
+      const response = await fetch(`${API_URL}/api/v1/products/${productId}/images/${image.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -466,7 +473,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
         formData.append('is_primary', String(makePrimary))
         formData.append('sort_order', String(index))
 
-        const response = await fetch(`http://localhost:8000/api/v1/products/${productId}/images`, {
+        const response = await fetch(`${API_URL}/api/v1/products/${productId}/images`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: formData,
@@ -505,7 +512,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
     setProductsError('')
     setNotice('')
     try {
-      const response = await fetch('http://localhost:8000/api/v1/products', {
+      const response = await fetch(`${API_URL}/api/v1/products`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -547,7 +554,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
     setAccountsError('')
     setNotice('')
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/users/${account.id}/status`, {
+      const response = await fetch(`${API_URL}/api/v1/users/${account.id}/status`, {
         method: 'PATCH',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -574,7 +581,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
         </button>
         <div className="mv-nav-label">WORKSPACE</div>
         <nav className="mv-nav">
-          {sections.map(([id, label], i) => (
+          {sections.map(([id, label]) => (
             <button key={id} className={`mv-nav-item ${active === id ? 'active' : ''}`} onClick={() => navigate(id)}>
               <span className="mv-nav-icon">{(() => { const Icon = NAV_ICONS[id] || LayoutDashboard; return <Icon size={19} strokeWidth={1.8} aria-hidden="true" /> })()}</span>
               {label}
@@ -634,7 +641,7 @@ function Dashboard({ user, token, onReturnToStore, onLogout }) {
                         return <Icon size={22} strokeWidth={1.8} aria-hidden="true" />
                       })()}
                   </span>
-                    <strong>{label}</strong><small>Open section <b>→</b></small>
+                    <strong>{label}</strong><small>Open section <b>&#8594;</b></small>
                   </button>
                 ))}
               </div>
